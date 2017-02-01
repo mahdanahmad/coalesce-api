@@ -5,9 +5,12 @@ from flask import Flask, Response, request
 from datetime import datetime, timedelta
 from bson import json_util
 from flask.ext.pymongo import PyMongo
+from flask.ext.cors import CORS, cross_origin
 
 app = Flask(__name__)
+cors = CORS(app)
 
+app.config['CORS_HEADERS']      = 'Content-Type'
 app.config['MONGO_HOST']        = 'localhost'
 app.config['MONGO_PORT']        = 27017
 app.config['MONGO_DBNAME']      = 'pulselab_coalesce'
