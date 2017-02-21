@@ -1,4 +1,5 @@
 const db        = require('../connection');
+const round     = require('mongo-round');
 
 const async     = require('async');
 const _         = require('lodash');
@@ -49,7 +50,7 @@ module.exports.selector  = (input, callback) => {
                 { $project : {
                     startDate   : { $dateToString: { format: "%Y-%m-%d", date: { $add : [{ $cond: [{ $lte : [ '$startDate', startDate ] }, startDate, '$startDate' ]}, 7 * 60 * 60 * 1000]}}},
                     endDate     : { $dateToString: { format: "%Y-%m-%d", date: { $add : [{ $cond: [{ $gte : [ '$endDate', endDate ] }, endDate, '$endDate' ]}, 7 * 60 * 60 * 1000]}}},
-                    count       : { $cond: [{ $eq : [datatype, 'rows'] }, '$rowcount', { $cond: [{ $eq : [datatype, 'filesize'] }, { $ceil : { $divide : ['$filesize', 1000] }}, { $literal : 1 }]}]},
+                    count       : { $cond: [{ $eq : [datatype, 'rows'] }, '$rowcount', { $cond: [{ $eq : [datatype, 'filesize'] }, round({ $divide : ['$filesize', 1000] }), { $literal : 1 }]}]},
                     tags : 1, datasets : 1
                 }},
                 { $group : { _id : '$datasets', tags : { $first : '$tags' }, count : { $sum : '$count' }, data : { $push : { s : '$startDate', e : '$endDate' } }}}
@@ -76,7 +77,7 @@ module.exports.stacked  = (input, callback) => {
     let result          = null;
     let missingParams   = [];
 
-    let startDate       = !_.isNil(input.startDate)     ? moment(input.startDate, "YYYY-MM-DD").toDate()    : moment().subtract(5, 'y').toDate();
+    let startDate       = !_.isNil(input.startDate)     ? moment(input.startDate, "YYYY-MM-DD").toDate()    : moment().subtract(6, 'y').toDate();
     let endDate         = !_.isNil(input.endDate)       ? moment(input.endDate, "YYYY-MM-DD").toDate()      : moment().toDate();
     let datatype        = !_.isNil(input.datatype)      ? input.datatype                                    : '';
     let tags            = !_.isNil(input.tags)          ? JSON.parse(input.tags)                            : null;
@@ -98,7 +99,7 @@ module.exports.stacked  = (input, callback) => {
                 { $project : {
                     s   : { $dateToString: { format: "%Y-%m-%d", date: { $add : [{ $cond: [{ $lte : [ '$startDate', startDate ] }, startDate, '$startDate' ]}, 7 * 60 * 60 * 1000]}}},
                     e   : { $dateToString: { format: "%Y-%m-%d", date: { $add : [{ $cond: [{ $gte : [ '$endDate', endDate ] }, endDate, '$endDate' ]}, 7 * 60 * 60 * 1000]}}},
-                    c   : { $cond: [{ $eq : [datatype, 'rows'] }, '$rowcount', { $cond: [{ $eq : [datatype, 'filesize'] }, { $ceil : { $divide : ['$filesize', 1000] }}, { $literal : 1 }]}]},
+                    c   : { $cond: [{ $eq : [datatype, 'rows'] }, '$rowcount', { $cond: [{ $eq : [datatype, 'filesize'] }, round({ $divide : ['$filesize', 1000] }), { $literal : 1 }]}]},
                     f   : '$frequency'
                 }},
             ], (err, res) => {
