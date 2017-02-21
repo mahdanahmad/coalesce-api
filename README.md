@@ -1,1 +1,1 @@
-An API for data coalition using Flask.
+An API for data coalition using Express and NodeJS.

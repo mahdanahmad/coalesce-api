@@ -1,0 +1,33 @@
+{
+  "name": "coalesce-api",
+  "version": "0.0.1",
+  "description": "API for coalesce using Mongodb native driver and Express",
+  "dependencies": {
+    "async": "^2.1.4",
+    "body-parser": "^1.16.0",
+    "cookie-parser": "^1.4.3",
+    "cors": "^2.8.1",
+    "dotenv": "^4.0.0",
+    "express": "^4.14.1",
+    "lodash": "^4.17.4",
+    "moment": "^2.17.1",
+    "mongodb": "^2.2.22",
+    "nodemon": "^1.11.0"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "nodemon ./app/server.js localhost",
+    "serve": "pm2 start ./app/server.js --name=\"coalesce-api\" --watch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/mahdanahmad/def-node-express-mongodb.git"
+  },
+  "author": "Mahdan Ahmad Fauzi Al-Hasan (github.com/mahdanahmad)",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/mahdanahmad/coalesce-api/issues"
+  },
+  "homepage": "https://github.com/mahdanahmad/coalesce-api#readme"
+}
