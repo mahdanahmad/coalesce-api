@@ -1,4 +1,3 @@
-// db.stacked.find({ date: { '$lte': new Date(), '$gte': new Date('2011-01-01') }, frequency: { '$in': [ 0,1,7,14,21,30,60,90,180,360,365,510,720,1080,1440,1800,2880,3101,3960,4680,5760] }, tags: { '$in': [ '3w' ]}}).explain()
 const db        = require('../connection');
 const round     = require('mongo-round');
 
@@ -15,10 +14,6 @@ module.exports.config   = (callback) => {
 
     async.waterfall([
         function (flowCallback) {
-            // db.getCollection('data').aggregate([{$group : { _id : 0, frequency : { $addToSet : '$frequency'} }} ], (err, res) => {
-            //     if (err) { return flowCallback(err); }
-            //     flowCallback(null, { frequency : _.chain(res).flatMap('frequency').sortBy().value() });
-            // });
 			db.getCollection('swimlane').distinct('frequency', (err, result) => {
 				flowCallback(null, { frequency : _.sortBy(result) });
 			});
@@ -117,7 +112,6 @@ module.exports.stacked  = (input, callback) => {
                     c: { $cond: [{ $eq : [datatype, 'rows'] }, '$rowcount', { $cond: [{ $eq : [datatype, 'filesize'] }, round({ $divide : ['$filesize', 1000] }), { $literal : 1 }]}]},
                     f: '$frequency'
                 }},
-				// { $group : { _id : '$d', raw: { $push: { f : '$f', c : '$c' } }}},
 				{ $group : { _id : { d: '$d', f: '$f' }, c: { $sum: '$c' }}},
 				{ $project : { _id: '$_id.d', f: '$_id.f', c: '$c' }},
 				{ $group : { _id: '$_id', data: { $push: { f: '$f', c: '$c' }}}},
@@ -126,6 +120,54 @@ module.exports.stacked  = (input, callback) => {
 				if (err) { return flowCallback(err); } else {
 					let max
 					return flowCallback(null, { timeline: res, startDate: _.chain(res).first().get('_id', moment().format('YYYY-MM-DD')), endDate: _.chain(res).last().get('_id', moment().format('YYYY-MM-DD')), maxData: _.chain(res).map((o) => _.sumBy(o.data, 'c')).max().value() });
+				}
+            });
+        },
+    ], (err, asyncResult) => {
+        if (err) {
+            response    = 'FAILED';
+            status_code = 400;
+            message     = err;
+        } else {
+            result      = asyncResult;
+        }
+        callback({ response, status_code, message, result });
+    });
+};
+
+module.exports.datasets	= (input, callback) => {
+    let response        = 'OK';
+    let status_code     = 200;
+    let message         = 'Get datasets data success.';
+    let result          = null;
+    let missingParams   = [];
+
+    let tags            = !_.isNil(input.tags)          ? JSON.parse(input.tags)		: null;
+    let frequencies     = !_.isNil(input.frequencies)   ? JSON.parse(input.frequencies)	: [];
+
+    if (_.isNil(input.tags)) { missingParams.push('tags'); }
+    if (_.isNil(input.frequencies)) { missingParams.push('frequencies'); }
+
+    async.waterfall([
+        function (flowCallback) {
+			if (!_.isEmpty(missingParams)) {
+				flowCallback('Missing parameters : {' + missingParams.join(', ') + '}');
+			} else {
+				flowCallback(null);
+			}
+		},
+        function (flowCallback) {
+            db.getCollection('raw').aggregate([
+                { $match: { freqs: { $in: frequencies }, tags: { $in: tags }}},
+                { $project : {
+                    name: '$dataset',
+					tags: { $filter: { input: '$tags', as: 'tag', cond: { $in: ['$$tag', tags]}}},
+					frequency: { $filter: { input: '$freqs', as: 'freq', cond: { $in: ['$$freq', frequencies]}}},
+                }},
+            ], { explain: false }, (err, res) => {
+				if (err) { return flowCallback(err); } else {
+					let max
+					return flowCallback(null, res);
 				}
             });
         },

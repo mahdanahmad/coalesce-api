@@ -14,5 +14,8 @@ router.get('/selector', (req, res, next) => {
 router.get('/stacked', (req, res, next) => {
     controller.stacked(req.query, (result) => { res.status(result.status_code).json(result); });
 });
+router.get('/datasets', (req, res, next) => {
+    controller.datasets(req.query, (result) => { res.status(result.status_code).json(result); });
+});
 
 module.exports = router;
