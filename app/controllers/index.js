@@ -39,6 +39,7 @@ module.exports.selector  = (input, callback) => {
 
     let startDate       = !_.isNil(input.startDate)     ? moment(input.startDate, "YYYY-MM-DD").toDate()    : moment().subtract(5, 'y').toDate();
     let endDate         = !_.isNil(input.endDate)       ? moment(input.endDate, "YYYY-MM-DD").toDate()      : moment().toDate();
+	let numtags			= !_.isNil(input.numtags)		? _.toInteger(input.numtags)						: 20;
     let datatype        = !_.isNil(input.datatype)      ? input.datatype                                    : '';
     let frequencies     = !_.isNil(input.frequencies)   ? JSON.parse(input.frequencies)                     : [];
 
@@ -49,7 +50,7 @@ module.exports.selector  = (input, callback) => {
 				{ $unwind: '$tags' },
 				{ $group: { '_id': '$tags', 'count': { '$sum': 1 }}},
 				{ $sort: { 'count': -1 }},
-				{ $limit: 20 }
+				{ $limit: numtags }
 			], (err, res) => {
 				if (err) { return flowCallback(err); } else { return flowCallback(null, _.map(res, '_id')); }
 			});
