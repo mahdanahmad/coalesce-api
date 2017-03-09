@@ -1,3 +1,4 @@
+// db.stacked.find({ date: { '$lte': new Date(), '$gte': new Date('2011-01-01') }, frequency: { '$in': [ 0,1,7,14,21,30,60,90,180,360,365,510,720,1080,1440,1800,2880,3101,3960,4680,5760] }, tags: { '$in': [ '3w' ]}}).explain()
 const db        = require('../connection');
 const round     = require('mongo-round');
 
@@ -14,10 +15,13 @@ module.exports.config   = (callback) => {
 
     async.waterfall([
         function (flowCallback) {
-            db.getCollection('data').aggregate([{$group : { _id : 0, frequency : { $addToSet : '$frequency'} }} ], (err, res) => {
-                if (err) { return flowCallback(err); }
-                flowCallback(null, { frequency : _.chain(res).flatMap('frequency').sortBy().value() });
-            });
+            // db.getCollection('data').aggregate([{$group : { _id : 0, frequency : { $addToSet : '$frequency'} }} ], (err, res) => {
+            //     if (err) { return flowCallback(err); }
+            //     flowCallback(null, { frequency : _.chain(res).flatMap('frequency').sortBy().value() });
+            // });
+			db.getCollection('swimlane').distinct('frequency', (err, result) => {
+				flowCallback(null, { frequency : _.sortBy(result) });
+			});
         },
     ], (err, asyncResult) => {
         if (err) {
@@ -44,18 +48,30 @@ module.exports.selector  = (input, callback) => {
     let frequencies     = !_.isNil(input.frequencies)   ? JSON.parse(input.frequencies)                     : [];
 
     async.waterfall([
-        function (flowCallback) {
-            db.getCollection('data').aggregate([
-                { $match : { startDate : { $lte : endDate }, endDate : { $gte : startDate }, frequency : { $in : frequencies }}},
-                { $project : {
-                    startDate   : { $dateToString: { format: "%Y-%m-%d", date: { $add : [{ $cond: [{ $lte : [ '$startDate', startDate ] }, startDate, '$startDate' ]}, 7 * 60 * 60 * 1000]}}},
-                    endDate     : { $dateToString: { format: "%Y-%m-%d", date: { $add : [{ $cond: [{ $gte : [ '$endDate', endDate ] }, endDate, '$endDate' ]}, 7 * 60 * 60 * 1000]}}},
-                    count       : { $cond: [{ $eq : [datatype, 'rows'] }, '$rowcount', { $cond: [{ $eq : [datatype, 'filesize'] }, round({ $divide : ['$filesize', 1000] }), { $literal : 1 }]}]},
-                    tags : 1, datasets : 1
+		function (flowCallback) {
+			db.getCollection('raw').aggregate([
+				{ $match: { 'freqs': { '$in': frequencies }}},
+				{ $unwind: '$tags' },
+				{ $group: { '_id': '$tags', 'count': { '$sum': 1 }}},
+				{ $sort: { 'count': -1 }},
+				{ $limit: 20 }
+			], (err, res) => {
+				if (err) { return flowCallback(err); } else { return flowCallback(null, _.map(res, '_id')); }
+			});
+		},
+        function (top20tags, flowCallback) {
+            db.getCollection('swimlane').aggregate([
+                { $match: { startDate : { $lte : endDate }, endDate : { $gte : startDate }, frequency : { $in : frequencies }, tags: { $in: top20tags }}},
+                { $project: {
+                    startDate	: { $dateToString: { format: "%Y-%m-%d", date: { $add: [{ $cond: [{ $lte: [ '$startDate', startDate ] }, startDate, '$startDate' ]}, 7 * 60 * 60 * 1000]}}},
+                    endDate		: { $dateToString: { format: "%Y-%m-%d", date: { $add: [{ $cond: [{ $gte: [ '$endDate', endDate ] }, endDate, '$endDate' ]}, 7 * 60 * 60 * 1000]}}},
+                    count		: { $cond: [{ $eq: [datatype, 'rows'] }, '$rowcount', { $cond: [{ $eq : [datatype, 'filesize'] }, round({ $divide: ['$filesize', 1000] }), { $literal: 1 }]}]},
+                    tags		: { $filter: { input: '$tags', as: 'tag', cond: { $in: ['$$tag', top20tags]}}},
+					dataset		: 1
                 }},
-                { $group : { _id : '$datasets', tags : { $first : '$tags' }, count : { $sum : '$count' }, data : { $push : { s : '$startDate', e : '$endDate' } }}}
-            ], (err, res) => {
-                flowCallback(null, res);
+                { $group: { _id: '$dataset', tags: { $first: '$tags' }, count: { $sum: '$count' }, data: { $push: { s: '$startDate', e: '$endDate' } }}}
+            ], { explain: false }, (err, res) => {
+                if (err) { return flowCallback(err); } else { return flowCallback(null, res); }
             });
         },
     ], (err, asyncResult) => {
@@ -94,36 +110,23 @@ module.exports.stacked  = (input, callback) => {
 			}
 		},
         function (flowCallback) {
-            db.getCollection('data').aggregate([
-                { $match : { startDate : { $lte : endDate }, endDate : { $gte : startDate }, frequency : { $in : frequencies }, tags : { $in : tags }}},
+            db.getCollection('stacked').aggregate([
+                { $match: { date: { $lte: endDate, $gte: startDate }, frequency: { $in: frequencies }, tags: { $in: tags }}},
                 { $project : {
-                    s   : { $dateToString: { format: "%Y-%m-%d", date: { $add : [{ $cond: [{ $lte : [ '$startDate', startDate ] }, startDate, '$startDate' ]}, 7 * 60 * 60 * 1000]}}},
-                    e   : { $dateToString: { format: "%Y-%m-%d", date: { $add : [{ $cond: [{ $gte : [ '$endDate', endDate ] }, endDate, '$endDate' ]}, 7 * 60 * 60 * 1000]}}},
-                    c   : { $cond: [{ $eq : [datatype, 'rows'] }, '$rowcount', { $cond: [{ $eq : [datatype, 'filesize'] }, round({ $divide : ['$filesize', 1000] }), { $literal : 1 }]}]},
-                    f   : '$frequency'
+                    d: { $dateToString: { format: "%Y-%m-%d", date: { $add : ['$date', 7 * 60 * 60 * 1000]}}},
+                    c: { $cond: [{ $eq : [datatype, 'rows'] }, '$rowcount', { $cond: [{ $eq : [datatype, 'filesize'] }, round({ $divide : ['$filesize', 1000] }), { $literal : 1 }]}]},
+                    f: '$frequency'
                 }},
-            ], (err, res) => {
-                async.map(res, (o, callback) => {
-                    async.times(moment(o.e).diff(o.s, 'days') + 1, (d, next) => {
-                        let currentDate = moment(o.s).add(d, 'd');
-                        if (currentDate.isSameOrAfter(startDate) && currentDate.isSameOrBefore(endDate))  {
-                            next(null, { date : currentDate.format('YYYY-MM-DD'), freq : o.f, val : o.c })
-                        } else {
-                            next(null, null);
-                        }
-                    }, function(err, results) {
-                        callback(null, results);
-                    });
-                }, (err, results) => {
-                    let chained = _.chain(results).flatten().compact().groupBy('date');
-                    timeline    = chained.map((val, key) => ({date : key, data : _.chain(val).groupBy('freq').map((fval, fkey) => ({freq : parseInt(fkey), val : _.sumBy(fval, 'val')})).value()})).value();
-                    maxData     = chained.map((o) => (_.sumBy(o, 'val'))).max().value();
-                    if (maxData == 0) { maxData++; }
-
-                    listDate    = chained.map((o, key) => (key));
-
-                    flowCallback(null, { timeline, maxData, startDate : listDate.minBy((o) => (new Date(o))).value(), endDate : listDate.maxBy((o) => (new Date(o))).value() });
-                });
+				// { $group : { _id : '$d', raw: { $push: { f : '$f', c : '$c' } }}},
+				{ $group : { _id : { d: '$d', f: '$f' }, c: { $sum: '$c' }}},
+				{ $project : { _id: '$_id.d', f: '$_id.f', c: '$c' }},
+				{ $group : { _id: '$_id', data: { $push: { f: '$f', c: '$c' }}}},
+				{ $sort : { _id : 1 }},
+            ], { explain: false }, (err, res) => {
+				if (err) { return flowCallback(err); } else {
+					let max
+					return flowCallback(null, { timeline: res, startDate: _.chain(res).first().get('_id', moment().format('YYYY-MM-DD')), endDate: _.chain(res).last().get('_id', moment().format('YYYY-MM-DD')), maxData: _.chain(res).map((o) => _.sumBy(o.data, 'c')).max().value() });
+				}
             });
         },
     ], (err, asyncResult) => {
