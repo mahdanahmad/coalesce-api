@@ -58,38 +58,66 @@ module.exports.selector  = (input, callback) => {
 			});
 		},
         function (top20tags, flowCallback) {
-            db.getCollection('swimlane').aggregate([
+            db.getCollection('force').aggregate([
                 { $match: { startDate : { $lte : endDate }, endDate : { $gte : startDate }, frequency : { $in : frequencies }, tags: { $in: top20tags }}},
                 { $project: {
-                    startDate	: { $dateToString: { format: "%Y-%m-%d", date: { $add: [{ $cond: [{ $lte: [ '$startDate', startDate ] }, startDate, '$startDate' ]}, 7 * 60 * 60 * 1000]}}},
-                    endDate		: { $dateToString: { format: "%Y-%m-%d", date: { $add: [{ $cond: [{ $gte: [ '$endDate', endDate ] }, endDate, '$endDate' ]}, 7 * 60 * 60 * 1000]}}},
-                    count		: { $cond: [{ $eq: [datatype, 'rows'] }, '$rowcount', { $cond: [{ $eq : [datatype, 'filesize'] }, round({ $divide: ['$filesize', 1000] }), { $literal: 1 }]}]},
+                    count		: { $cond: [{ $eq: [datatype, 'rows'] }, '$rowcount', { $cond: [{ $eq : [datatype, 'filesize'] }, round({ $divide: ['$filesize', 1000000] }), { $literal: 1 }]}]},
                     tags		: { $filter: { input: '$tags', as: 'tag', cond: { $in: ['$$tag', top20tags]}}},
 					dataset		: 1
                 }},
-                { $group: { _id: '$dataset', tag: { $first: '$tags' }, count: { $sum: '$count' }, data: { $push: { s: '$startDate', e: '$endDate' } }}},
-				{ $unwind: '$tag' },
-				{ $group: { _id: '$tag', count: { $sum: '$count' }, data: { $addToSet: '$data' }}}
-
+                { $group: { _id: '$dataset', tags: { $first: '$tags' }, count: { $sum: '$count' }}},
+				// { $unwind: '$tag' },
+				// { $group: { _id: '$tag', count: { $sum: '$count' }}}
             ], { explain: explain }, (err, res) => {
-				let altered	= _.map(res, (o) => ({ tag: o._id, count: o.count, data: _.chain(o.data).flatMap().uniq().value() }));
+				let datasets    = _.chain(res);
+				let nodeData    = datasets.flatMap((o) => (_.map(o.tags, (tag) => ( { tag : tag, count : o.count } ), []))).groupBy('tag').map((val, key) => ({name : key, count : _.sumBy(val, 'count')})).value();
+				let linkData    = datasets.map('tags').flatMap((tags) => (_.reduce(tags, (result, value) => {
+			        let data    = [];
+			        if (_.size(result.tags) > 0) { _.forEach(result.tags, (o) => { data.push([o, value]); }); }
+			        return { data : _.concat((result['data'] || (result['data'] = [])), data), tags : _.concat(result['tags'] || (result['tags'] = []), value) };
+			    }, {}))['data']).groupBy((o) => (o)).map((val, key) => ({ source : key.split(',')[0], target : key.split(',')[1], count : _.size(val) })).value();
 
-				if (err) { return flowCallback(err); } else {
-					async.each(altered, (val, next) => {
-						async.map(val.data, (d, mapCallback) => {
-							async.times(moment(d.e).diff(d.s, 'days') + 1, (t, timesCallback) => {
-								timesCallback(null, moment(d.s).add(t, 'd').format('YYYY-MM-DD'));
-							}, (err, timesresults) => {
-								mapCallback(null, timesresults);
-							});
-						}, (err, mapresults) => {
-							val.days	= _.chain(mapresults).flatMap().uniq().size().value();
-							process.nextTick(() => { next(null); });
-						});
-					}, (err) => {
-						if (err) { return flowCallback(err); } else { return flowCallback(null, altered); }
-					});
-				}
+				if (err) { return flowCallback(err); } else { return flowCallback(null, { nodeData, linkData }); }
+            });
+        },
+    ], (err, asyncResult) => {
+        if (err) {
+            response    = 'FAILED';
+            status_code = 400;
+            message     = err;
+        } else {
+            result      = asyncResult;
+        }
+        callback({ response, status_code, message, result });
+    });
+};
+
+module.exports.swimlane	= (input, callback) => {
+	let response        = 'OK';
+    let status_code     = 200;
+    let message         = 'Get swimlane data success.';
+    let result          = null;
+    let missingParams   = [];
+
+    let startDate       = !_.isNil(input.startDate)     ? moment(input.startDate, "YYYY-MM-DD").toDate()    : moment().subtract(5, 'y').toDate();
+    let endDate         = !_.isNil(input.endDate)       ? moment(input.endDate, "YYYY-MM-DD").toDate()      : moment().toDate();
+    let tags     		= !_.isNil(input.tags)   		? JSON.parse(input.tags)                     		: [];
+    let frequencies     = !_.isNil(input.frequencies)   ? JSON.parse(input.frequencies)                     : [];
+
+	let explain     	= !_.isNil(input.explain)   	? (input.explain == 'true')							: false;
+
+    async.waterfall([
+        function (flowCallback) {
+            db.getCollection('swimlane').aggregate([
+                { $match: { tag : { $in : tags }, frequency : { $in : frequencies }}},
+				{ $project: {
+					datelist: { $filter: { input: '$datelist', as: 'date', cond: { $and: [{ $gte: ['$$date', startDate]}, { $lte: ['$$date', endDate] }]}}},
+					range: { $filter: { input: '$range', as: 'drop', cond: { $and: [{ $gte: ['$$drop.endDate', startDate]}, { $lte: ['$$drop.startDate', endDate]}]}}},
+					tag: 1, frequency: 1,
+				}},
+				{ $group : { _id: '$tag', range: { $addToSet: '$range' }, datelist: { $addToSet: '$datelist' }}}
+            ], { explain: explain }, (err, res) => {
+				if (err) { return flowCallback(err); } else { return flowCallback(null, _.map(res, (o) => ({ tag: o._id, range: _.chain(o.range).flatMap().map((o) => ({ startDate: (moment(startDate).isAfter(o.startDate) ? input.startDate : moment(o.startDate).format('YYYY-MM-DD')), endDate: (moment(endDate).isBefore(o.endDate) ? input.endDate : moment(o.endDate).format('YYYY-MM-DD'))})).value(), count: _.chain(o.datelist).flatMap().uniqBy((d) => (moment(d).format('YYYY-MM-DD'))).size().value() }))); }
             });
         },
     ], (err, asyncResult) => {

@@ -11,6 +11,9 @@ router.get('/config', (req,res, next) => {
 router.get('/selector', (req, res, next) => {
     controller.selector(req.query, (result) => { res.status(result.status_code).json(result); });
 });
+router.get('/swimlane', (req, res, next) => {
+    controller.swimlane(req.query, (result) => { res.status(result.status_code).json(result); });
+});
 router.get('/stacked', (req, res, next) => {
     controller.stacked(req.query, (result) => { res.status(result.status_code).json(result); });
 });
