@@ -151,7 +151,7 @@ MongoClient.connect(db_url, (err, db) => {
 					});
 
 					list = _.map(list, (range, frequency) => {
-						let datelist	= _.chain(range).flatMap((m) => (_.times(moment(m.endDate).diff(m.startDate, 'days') + 1, (x) => (moment(m.startDate).add(x, 'd').format('YYYY-MM-DD'))))).uniq().value();
+						let datelist	= _.chain(range).flatMap((m) => (_.times(moment(m.endDate).diff(m.startDate, 'days') + 1, (x) => (moment(m.startDate).add(x, 'd').format('YYYY-MM-DD'))))).uniq().map((x) => (moment(x).toDate())).value();
 						return ({ frequency: parseInt(frequency), range, datelist, tag: o.tag });
 					});
 
