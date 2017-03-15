@@ -15,6 +15,7 @@ MongoClient.connect(db_url, (err, db) => {
     if (err) { throw err; }
 
     let raw			= db.collection('raw');
+	let force		= db.collection('force');
     let stacked		= db.collection('stacked');
     let swimlane	= db.collection('swimlane');
 
@@ -24,9 +25,12 @@ MongoClient.connect(db_url, (err, db) => {
 				// if (err) { return callback(err); }
 				stacked.drop((err, result) => {
 					// if (err) { return callback(err); }
-					swimlane.drop((err, result) => {
+					force.drop((err, result) => {
 						// if (err) { return callback(err); }
-						callback();
+						swimlane.drop((err, result) => {
+							// if (err) { return callback(err); }
+							callback();
+						});
 					});
 				});
 			});
@@ -62,7 +66,7 @@ MongoClient.connect(db_url, (err, db) => {
 				});
 			}, function(err) {
 				if (err) { return callback(err); }
-				swimlane.insertMany(coalesce, (err, res) => { if (err) { return callback(err); } process.nextTick(function() { callback(null, data); }); });
+				force.insertMany(coalesce, (err, res) => { if (err) { return callback(err); } process.nextTick(() => { callback(null, data); }); });
 			});
 		},
 		function(data, callback) {
@@ -90,16 +94,78 @@ MongoClient.connect(db_url, (err, db) => {
 							temp	= Math.floor(counter * 100 / total);
 							if (temp !== percent) { console.log(temp + '%'); percent = temp; }
 
-							process.nextTick(function() { dataCallback(null); });
+							process.nextTick(() => { dataCallback(null); });
 						});
 					});
 				}, function(err) {
 					if (err) { return callback(err); }
-					process.nextTick(function() { datasetsCallback(null); });
+					process.nextTick(() => { datasetsCallback(null); });
 				});
 			}, function(err) {
 				if (err) { return callback(err); }
-				process.nextTick(function() { callback(null); });
+				process.nextTick(() => { callback(null, data); });
+			});
+		},
+		function(data, callback) {
+			let unwinded	= _.chain(data)
+								.flatMap((o) => { let timeline = _.map(o.timeline, (t) => (_.pick(t, ['startDate', 'endDate', 'frequency']))); return _.map(o.tags, (tag) => ({ tag, timeline })); })
+								.groupBy('tag')
+								.map((o, key) => ({tag: _.trim(key), timeline: _.flatMap(o, 'timeline')}))
+								.sortBy('tag')
+								.value();
+
+			async.eachSeries(unwinded, (o, datasetsCallback) => {
+				async.mapSeries(o.timeline, (t, dataCallback) => {
+					async.timesSeries(moment(t.endDate).diff(t.startDate, 'days') + 1, (d, next) => {
+				        next(null, moment(t.startDate).add(d, 'd').toDate());
+					}, function(err, results) {
+						if (err) { return callback(err); }
+						process.nextTick(() => { dataCallback(null, { results, frequency: t.frequency }); });
+					});
+				}, function(err, results) {
+					if (err) { return callback(err); }
+
+					let uniqtimeline	= _.chain(results).flatMap().groupBy('frequency').mapValues((o) => (_.chain(o).flatMap('results').uniqBy((o) => (moment(o).format("YYYY-MM-DD"))).sortBy().value())).value();
+
+					let	list			= {};
+					_.forEach(uniqtimeline, (eachfreq, freq) => {
+						list[freq]		= [];
+						let startDate	= null;
+						let prevDate	= null;
+						_.forEach(eachfreq, (u) => {
+							if (_.isNull(startDate)) {
+								startDate	= u;
+								prevDate	= u;
+							} else {
+								if (moment(u).diff(prevDate, 'days') == 1) {
+									prevDate	= u;
+								} else {
+									list[freq].push({ startDate, endDate: prevDate });
+									startDate	= u;
+									prevDate	= u;
+								}
+							}
+
+						});
+						list[freq].push({ startDate, endDate: prevDate });
+					});
+
+					list = _.map(list, (range, frequency) => {
+						let datelist	= _.chain(range).flatMap((m) => (_.times(moment(m.endDate).diff(m.startDate, 'days') + 1, (x) => (moment(m.startDate).add(x, 'd').format('YYYY-MM-DD'))))).uniq().value();
+						return ({ frequency, range, datelist, tag: o.tag });
+					});
+
+					console.log(o.tag);
+					swimlane.insertMany(list, (err) => {
+						if (err) { return datasetsCallback(err); }
+
+						process.nextTick(() => { datasetsCallback(null); });
+					});
+
+				});
+			}, function(err) {
+				if (err) { return callback(err); }
+				process.nextTick(() => { callback(null); });
 			});
 		},
 		// function(callback) {
@@ -107,13 +173,16 @@ MongoClient.connect(db_url, (err, db) => {
 		// },
 		function(callback) {
 			console.log('Indexing database...');
+			force.ensureIndex('frequency', { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
+		},
+		function(callback) {
+			force.ensureIndex({startDate: 1, endDate: 1, frequency: 1}, { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
+		},
+		function(callback) {
+			swimlane.ensureIndex({tag: 1, frequency: 1}, { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
+		},
+		function(callback) {
 			stacked.ensureIndex({date: 1, frequency: 1, tags: 1}, { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
-		},
-		function(callback) {
-			swimlane.ensureIndex('frequency', { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
-		},
-		function(callback) {
-			swimlane.ensureIndex({startDate: 1, endDate: 1, frequency: 1}, { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
 		},
 	], (err, asyncResult) => {
 		if (err) { throw err; }

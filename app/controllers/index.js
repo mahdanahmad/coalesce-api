@@ -43,6 +43,8 @@ module.exports.selector  = (input, callback) => {
     let datatype        = !_.isNil(input.datatype)      ? input.datatype                                    : '';
     let frequencies     = !_.isNil(input.frequencies)   ? JSON.parse(input.frequencies)                     : [];
 
+	let explain     	= !_.isNil(input.explain)   	? (input.explain == 'true')							: false;
+
     async.waterfall([
 		function (flowCallback) {
 			db.getCollection('raw').aggregate([
@@ -65,9 +67,29 @@ module.exports.selector  = (input, callback) => {
                     tags		: { $filter: { input: '$tags', as: 'tag', cond: { $in: ['$$tag', top20tags]}}},
 					dataset		: 1
                 }},
-                { $group: { _id: '$dataset', tags: { $first: '$tags' }, count: { $sum: '$count' }, data: { $push: { s: '$startDate', e: '$endDate' } }}}
-            ], { explain: false }, (err, res) => {
-                if (err) { return flowCallback(err); } else { return flowCallback(null, res); }
+                { $group: { _id: '$dataset', tag: { $first: '$tags' }, count: { $sum: '$count' }, data: { $push: { s: '$startDate', e: '$endDate' } }}},
+				{ $unwind: '$tag' },
+				{ $group: { _id: '$tag', count: { $sum: '$count' }, data: { $addToSet: '$data' }}}
+
+            ], { explain: explain }, (err, res) => {
+				let altered	= _.map(res, (o) => ({ tag: o._id, count: o.count, data: _.chain(o.data).flatMap().uniq().value() }));
+
+				if (err) { return flowCallback(err); } else {
+					async.each(altered, (val, next) => {
+						async.map(val.data, (d, mapCallback) => {
+							async.times(moment(d.e).diff(d.s, 'days') + 1, (t, timesCallback) => {
+								timesCallback(null, moment(d.s).add(t, 'd').format('YYYY-MM-DD'));
+							}, (err, timesresults) => {
+								mapCallback(null, timesresults);
+							});
+						}, (err, mapresults) => {
+							val.days	= _.chain(mapresults).flatMap().uniq().size().value();
+							process.nextTick(() => { next(null); });
+						});
+					}, (err) => {
+						if (err) { return flowCallback(err); } else { return flowCallback(null, altered); }
+					});
+				}
             });
         },
     ], (err, asyncResult) => {
@@ -95,6 +117,8 @@ module.exports.stacked  = (input, callback) => {
     let tags            = !_.isNil(input.tags)          ? JSON.parse(input.tags)                            : null;
     let frequencies     = !_.isNil(input.frequencies)   ? JSON.parse(input.frequencies)                     : [];
 
+	let explain     	= !_.isNil(input.explain)   	? (input.explain == 'true')							: false;
+
     if (_.isNil(input.tags)) { missingParams.push('tags'); }
 
     async.waterfall([
@@ -110,14 +134,14 @@ module.exports.stacked  = (input, callback) => {
                 { $match: { date: { $lte: endDate, $gte: startDate }, frequency: { $in: frequencies }, tags: { $in: tags }}},
                 { $project : {
                     d: { $dateToString: { format: "%Y-%m-%d", date: { $add : ['$date', 7 * 60 * 60 * 1000]}}},
-                    c: { $cond: [{ $eq : [datatype, 'rows'] }, '$rowcount', { $cond: [{ $eq : [datatype, 'filesize'] }, round({ $divide : ['$filesize', 1000] }), { $literal : 1 }]}]},
+                    c: { $cond: [{ $eq : [datatype, 'rows'] }, '$rowcount', { $cond: [{ $eq : [datatype, 'filesize'] }, round({ $divide : ['$filesize', 1000000] }), { $literal : 1 }]}]},
                     f: '$frequency'
                 }},
 				{ $group : { _id : { d: '$d', f: '$f' }, c: { $sum: '$c' }}},
 				{ $project : { _id: '$_id.d', f: '$_id.f', c: '$c' }},
 				{ $group : { _id: '$_id', data: { $push: { f: '$f', c: '$c' }}}},
 				{ $sort : { _id : 1 }},
-            ], { explain: false }, (err, res) => {
+            ], { explain: explain }, (err, res) => {
 				if (err) { return flowCallback(err); } else {
 					let max
 					return flowCallback(null, { timeline: res, startDate: _.chain(res).first().get('_id', moment().format('YYYY-MM-DD')), endDate: _.chain(res).last().get('_id', moment().format('YYYY-MM-DD')), maxData: _.chain(res).map((o) => _.sumBy(o.data, 'c')).max().value() });
