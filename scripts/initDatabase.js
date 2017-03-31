@@ -7,7 +7,7 @@ const fs            = require('fs');
 const ObjectID      = require('mongodb').ObjectID;
 const MongoClient   = require('mongodb').MongoClient;
 
-const filepath      = './public/result.json';
+const filepath      = './public/data.go.id-result.json';
 
 const auth          = (process.env.DB_USERNAME !== '' || process.env.DB_PASSWORD !== '') ? process.env.DB_USERNAME + ':' + process.env.DB_PASSWORD + '@' : '';
 const db_url        = 'mongodb://' + auth + process.env.DB_HOST + ':' + process.env.DB_PORT +  '/' + process.env.DB_DATABASE;
