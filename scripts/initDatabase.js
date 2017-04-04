@@ -7,7 +7,7 @@ const fs            = require('fs');
 const ObjectID      = require('mongodb').ObjectID;
 const MongoClient   = require('mongodb').MongoClient;
 
-const filepath      = './public/data.go.id-result.json';
+const files			= ['data.go.id', 'data.humdata.org'];
 
 const auth          = (process.env.DB_USERNAME !== '' || process.env.DB_PASSWORD !== '') ? process.env.DB_USERNAME + ':' + process.env.DB_PASSWORD + '@' : '';
 const db_url        = 'mongodb://' + auth + process.env.DB_HOST + ':' + process.env.DB_PORT +  '/' + process.env.DB_DATABASE;
@@ -36,10 +36,18 @@ MongoClient.connect(db_url, (err, db) => {
 			});
 		},
 		function(callback) {
-			fs.readFile(filepath, 'utf8', (err, data) => {
+			async.map(files, (val, next) => {
+				fs.readFile('./public/' + val + '-result.json', 'utf8', (err, data) => {
+					if (err) { return callback(err); }
+
+					next(null, _.map(JSON.parse(data), (o) => (_.assign({}, o, { freqs: _.chain(o.timeline).flatMap('frequency').uniq().value(), source : val }))));
+				});
+			}, (err, results) => {
 				if (err) { return callback(err); }
-				callback(null, _.map(JSON.parse(data), (o) => (_.assign({}, o, { freqs: _.chain(o.timeline).flatMap('frequency').uniq().value() }))));
-			});
+
+				callback(null, _.flatten(results));
+				// callback(null, _.chain(results).flatten().sampleSize(100).value());
+			})
 		},
 		function(data, callback) {
 			raw.insertMany(data, (err, res) => { if (err) { return callback(err); } callback(null, data); });
@@ -57,6 +65,7 @@ MongoClient.connect(db_url, (err, db) => {
 						tags		: _.map(o.tags, _.trim),
 						group		: o.group,
 						dataset		: o.dataset,
+						source		: o.source
 					});
 
 					process.nextTick(function() { dataCallback(); });
@@ -84,6 +93,7 @@ MongoClient.connect(db_url, (err, db) => {
 		                    tags        : _.map(o.tags, _.trim),
 		                    group       : o.groups,
 		                    dataset		: o.dataset,
+							source		: o.source
 		                });
 					}, function(err, results) {
 						if (err) { return callback(err); }
@@ -108,9 +118,9 @@ MongoClient.connect(db_url, (err, db) => {
 		},
 		function(data, callback) {
 			let unwinded	= _.chain(data)
-								.flatMap((o) => { let timeline = _.map(o.timeline, (t) => (_.pick(t, ['startDate', 'endDate', 'frequency']))); return _.map(o.tags, (tag) => ({ tag, timeline })); })
-								.groupBy('tag')
-								.map((o, key) => ({tag: _.trim(key), timeline: _.flatMap(o, 'timeline')}))
+								.flatMap((o) => { let timeline = _.map(o.timeline, (t) => (_.pick(t, ['startDate', 'endDate', 'frequency']))); return _.map(o.tags, (tag) => ({ tag, timeline, source: o.source })); })
+								.groupBy((o) => (_.trim(o.tag) + '~' + o.source))
+								.map((o, key) => ({ tag: key.split('~')[0], timeline: _.flatMap(o, 'timeline'), source: key.split('~')[1] }))
 								.sortBy('tag')
 								.value();
 
@@ -152,7 +162,7 @@ MongoClient.connect(db_url, (err, db) => {
 
 					list = _.map(list, (range, frequency) => {
 						let datelist	= _.chain(range).flatMap((m) => (_.times(moment(m.endDate).diff(m.startDate, 'days') + 1, (x) => (moment(m.startDate).add(x, 'd').format('YYYY-MM-DD'))))).uniq().map((x) => (moment(x).toDate())).value();
-						return ({ frequency: parseInt(frequency), range, datelist, tag: o.tag });
+						return ({ frequency: parseInt(frequency), range, datelist, tag: o.tag, source: o.source });
 					});
 
 					console.log(o.tag);
@@ -168,21 +178,24 @@ MongoClient.connect(db_url, (err, db) => {
 				process.nextTick(() => { callback(null); });
 			});
 		},
-		// function(callback) {
-		// 	stacked.ensureIndex('frequency', { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
-		// },
 		function(callback) {
 			console.log('Indexing database...');
-			force.ensureIndex('frequency', { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
+			raw.ensureIndex({ frequency: 1, source: 1 }, { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
 		},
 		function(callback) {
-			force.ensureIndex({startDate: 1, endDate: 1, frequency: 1}, { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
+			raw.ensureIndex({ frequency: 1, tags:1, source: 1 }, { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
 		},
 		function(callback) {
-			swimlane.ensureIndex({tag: 1, frequency: 1}, { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
+			force.ensureIndex({frequency: 1, source: 1}, { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
 		},
 		function(callback) {
-			stacked.ensureIndex({date: 1, frequency: 1, tags: 1}, { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
+			force.ensureIndex({startDate: 1, endDate: 1, frequency: 1, source: 1}, { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
+		},
+		function(callback) {
+			swimlane.ensureIndex({tag: 1, frequency: 1, source: 1}, { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
+		},
+		function(callback) {
+			stacked.ensureIndex({date: 1, frequency: 1, tags: 1, source: 1}, { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
 		},
 	], (err, asyncResult) => {
 		if (err) { throw err; }
