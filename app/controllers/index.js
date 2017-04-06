@@ -12,9 +12,11 @@ module.exports.config   = (input, callback) => {
     let result          = null;
     let missingParams   = [];
 
+	let source			= !_.isNil(input.source) ? JSON.parse(input.source)	: [];
+
     async.waterfall([
         function (flowCallback) {
-			db.getCollection('force').distinct('frequency', { source: input.source }, (err, result) => {
+			db.getCollection('force').distinct('frequency', { source : { $in: source }}, (err, result) => {
 				flowCallback(null, { frequency : _.sortBy(result) });
 			});
         },
@@ -42,14 +44,14 @@ module.exports.selector  = (input, callback) => {
 	let numtags			= !_.isNil(input.numtags)		? _.toInteger(input.numtags)						: 20;
     let datatype        = !_.isNil(input.datatype)      ? input.datatype                                    : '';
     let frequencies     = !_.isNil(input.frequencies)   ? JSON.parse(input.frequencies)                     : [];
-	let source			= !_.isNil(input.source)   		? input.source										: null;
+	let source			= !_.isNil(input.source)   		? JSON.parse(input.source)							: [];
 
 	let explain     	= !_.isNil(input.explain)   	? (input.explain == 'true')							: false;
 
     async.waterfall([
 		function (flowCallback) {
 			db.getCollection('raw').aggregate([
-				{ $match: { 'freqs': { '$in': frequencies }, source }},
+				{ $match: { freqs: { $in: frequencies }, source : { $in: source }}},
 				{ $unwind: '$tags' },
 				{ $group: { '_id': '$tags', 'count': { '$sum': 1 }}},
 				{ $sort: { 'count': -1 }},
@@ -60,7 +62,7 @@ module.exports.selector  = (input, callback) => {
 		},
         function (top20tags, flowCallback) {
             db.getCollection('force').aggregate([
-                { $match: { startDate : { $lte : endDate }, endDate : { $gte : startDate }, frequency : { $in : frequencies }, tags: { $in: top20tags }, source }},
+                { $match: { startDate : { $lte : endDate }, endDate : { $gte : startDate }, frequency : { $in : frequencies }, tags: { $in: top20tags }, source : { $in: source }}},
                 { $project: {
                     count		: { $cond: [{ $eq: [datatype, 'rows'] }, '$rowcount', { $cond: [{ $eq : [datatype, 'filesize'] }, round({ $divide: ['$filesize', 1000000] }), { $literal: 1 }]}]},
                     tags		: { $filter: { input: '$tags', as: 'tag', cond: { $in: ['$$tag', top20tags]}}},
@@ -111,14 +113,14 @@ module.exports.swimlane	= (input, callback) => {
     let endDate         = !_.isNil(input.endDate)       ? moment(input.endDate, "YYYY-MM-DD").toDate()      : moment().toDate();
     let tags     		= !_.isNil(input.tags)   		? JSON.parse(input.tags)                     		: [];
     let frequencies     = !_.isNil(input.frequencies)   ? JSON.parse(input.frequencies)                     : [];
-	let source			= !_.isNil(input.source)   		? input.source										: null;
+	let source			= !_.isNil(input.source)   		? JSON.parse(input.source)							: [];
 
 	let explain     	= !_.isNil(input.explain)   	? (input.explain == 'true')							: false;
 
     async.waterfall([
         function (flowCallback) {
             db.getCollection('swimlane').aggregate([
-                { $match: { tag : { $in : tags }, frequency : { $in : frequencies }, source }},
+                { $match: { tag : { $in : tags }, frequency : { $in : frequencies }, source : { $in: source }}},
 				{ $project: {
 					datelist: { $filter: { input: '$datelist', as: 'date', cond: { $and: [{ $gte: ['$$date', startDate]}, { $lte: ['$$date', endDate] }]}}},
 					range: { $filter: { input: '$range', as: 'drop', cond: { $and: [{ $gte: ['$$drop.endDate', startDate]}, { $lte: ['$$drop.startDate', endDate]}]}}},
@@ -158,7 +160,7 @@ module.exports.stacked  = (input, callback) => {
     let datatype        = !_.isNil(input.datatype)      ? input.datatype                                    : '';
     let tags            = !_.isNil(input.tags)          ? JSON.parse(input.tags)                            : null;
     let frequencies     = !_.isNil(input.frequencies)   ? JSON.parse(input.frequencies)                     : [];
-	let source			= !_.isNil(input.source)   		? input.source										: null;
+	let source			= !_.isNil(input.source)   		? JSON.parse(input.source)							: [];
 
 	let explain     	= !_.isNil(input.explain)   	? (input.explain == 'true')							: false;
 
@@ -174,7 +176,7 @@ module.exports.stacked  = (input, callback) => {
 		},
         function (flowCallback) {
             db.getCollection('stacked').aggregate([
-                { $match: { date: { $lte: endDate, $gte: startDate }, frequency: { $in: frequencies }, tags: { $in: tags }, source }},
+                { $match: { date: { $lte: endDate, $gte: startDate }, frequency: { $in: frequencies }, tags: { $in: tags }, source : { $in: source }}},
                 { $project : {
                     d: { $dateToString: { format: "%Y-%m-%d", date: { $add : ['$date', 7 * 60 * 60 * 1000]}}},
                     c: { $cond: [{ $eq : [datatype, 'rows'] }, '$rowcount', { $cond: [{ $eq : [datatype, 'filesize'] }, round({ $divide : ['$filesize', 1000000] }), { $literal : 1 }]}]},
@@ -214,7 +216,7 @@ module.exports.datasets	= (input, callback) => {
 
     let tags            = !_.isNil(input.tags)          ? JSON.parse(input.tags)		: null;
     let frequencies     = !_.isNil(input.frequencies)   ? JSON.parse(input.frequencies)	: [];
-	let source     		= !_.isNil(input.source)   		? input.source					: null;
+	let source     		= !_.isNil(input.source)   		? JSON.parse(input.source)		: [];
 
 	let explain     	= !_.isNil(input.explain)   	? (input.explain == 'true')		: false;
 
@@ -231,7 +233,7 @@ module.exports.datasets	= (input, callback) => {
 		},
         function (flowCallback) {
             db.getCollection('raw').aggregate([
-                { $match: { freqs: { $in: frequencies }, tags: { $in: tags }, source }},
+                { $match: { freqs: { $in: frequencies }, tags: { $in: tags }, source : { $in: source }}},
                 { $project : {
                     name: '$dataset',
 					tags: { $filter: { input: '$tags', as: 'tag', cond: { $in: ['$$tag', tags]}}},
