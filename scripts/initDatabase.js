@@ -1,4 +1,6 @@
 require('dotenv').config();
+const util 			= require('util');
+
 const async         = require('async');
 const _             = require('lodash');
 const moment        = require('moment');
@@ -8,6 +10,9 @@ const ObjectID      = require('mongodb').ObjectID;
 const MongoClient   = require('mongodb').MongoClient;
 
 const files			= ['data.go.id', 'data.humdata.org'];
+
+const stoptags		= './public/data.go.id-remove.csv';
+const wilayahfile	= './public/mappedWilayah.json';
 
 const auth          = (process.env.DB_USERNAME !== '' || process.env.DB_PASSWORD !== '') ? process.env.DB_USERNAME + ':' + process.env.DB_PASSWORD + '@' : '';
 const db_url        = 'mongodb://' + auth + process.env.DB_HOST + ':' + process.env.DB_PORT +  '/' + process.env.DB_DATABASE;
@@ -36,11 +41,23 @@ MongoClient.connect(db_url, (err, db) => {
 			});
 		},
 		function(callback) {
+			fs.readFile(stoptags, 'utf8', (err, data) => {
+				if (err) { return callback(err); }
+
+				let removedtags	= data.split(/\r?\n/);
+				fs.readFile(wilayahfile, (err, data) => {
+					if (err) { return callback(err); }
+
+					callback(null, removedtags, JSON.parse(data));
+				});
+			});
+		},
+		function(removedtags, wilayahs, callback) {
 			async.map(files, (val, next) => {
 				fs.readFile('./public/' + val + '-result.json', 'utf8', (err, data) => {
 					if (err) { return callback(err); }
 
-					next(null, _.map(JSON.parse(data), (o) => (_.assign({}, o, { freqs: _.chain(o.timeline).flatMap('frequency').uniq().value(), source : val }))));
+					next(null, _.map(JSON.parse(data), (o) => (_.assign({}, o, { freqs: _.chain(o.timeline).flatMap('frequency').uniq().value(), source : val, wilayah: wilayahs[o.dataset], tags: _.difference(o.tags, removedtags) }))));
 				});
 			}, (err, results) => {
 				if (err) { return callback(err); }
@@ -65,7 +82,8 @@ MongoClient.connect(db_url, (err, db) => {
 						tags		: _.map(o.tags, _.trim),
 						group		: o.group,
 						dataset		: o.dataset,
-						source		: o.source
+						source		: o.source,
+						wilayah		: o.wilayah,
 					});
 
 					process.nextTick(function() { dataCallback(); });
@@ -93,7 +111,8 @@ MongoClient.connect(db_url, (err, db) => {
 		                    tags        : _.map(o.tags, _.trim),
 		                    group       : o.groups,
 		                    dataset		: o.dataset,
-							source		: o.source
+							source		: o.source,
+							wilayah		: o.wilayah,
 		                });
 					}, function(err, results) {
 						if (err) { return callback(err); }
@@ -183,6 +202,9 @@ MongoClient.connect(db_url, (err, db) => {
 			raw.ensureIndex({ frequency: 1, source: 1 }, { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
 		},
 		function(callback) {
+			raw.ensureIndex({ wilayah:1, source: 1 }, { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
+		},
+		function(callback) {
 			raw.ensureIndex({ frequency: 1, tags:1, source: 1 }, { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
 		},
 		function(callback) {
@@ -190,6 +212,9 @@ MongoClient.connect(db_url, (err, db) => {
 		},
 		function(callback) {
 			force.ensureIndex({startDate: 1, endDate: 1, frequency: 1, source: 1}, { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
+		},
+		function(callback) {
+			force.ensureIndex({startDate: 1, endDate: 1, frequency: 1, source: 1, wilayah: 1}, { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
 		},
 		function(callback) {
 			swimlane.ensureIndex({tag: 1, frequency: 1, source: 1}, { background: true }, (err) => { if (err) { return callback(err); } else { return callback(null); } });
