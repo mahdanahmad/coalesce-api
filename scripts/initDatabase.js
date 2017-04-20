@@ -62,8 +62,8 @@ MongoClient.connect(db_url, (err, db) => {
 			}, (err, results) => {
 				if (err) { return callback(err); }
 
-				callback(null, _.flatten(results));
-				// callback(null, _.chain(results).flatten().sampleSize(100).value());
+				// callback(null, _.flatten(results));
+				callback(null, _.chain(results).flatten().sampleSize(100).value());
 			})
 		},
 		function(data, callback) {

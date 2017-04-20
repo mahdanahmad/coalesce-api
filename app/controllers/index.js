@@ -16,8 +16,14 @@ module.exports.config   = (input, callback) => {
 
     async.waterfall([
         function (flowCallback) {
-			db.getCollection('force').distinct('frequency', { source : { $in: source }}, (err, result) => {
-				flowCallback(null, { frequency : _.sortBy(result) });
+			db.getCollection('force').distinct('frequency', { source : { $in: source }}, (err, frequencies) => {
+				if (err) { return flowCallback(err); }
+
+				db.getCollection('force').distinct('wilayah', { source : { $in: source }}, (err, locations) => {
+					if (err) { return flowCallback(err); }
+
+					flowCallback(null, { frequency : _.sortBy(frequencies), location: _.sortBy(locations) });
+				});
 			});
         },
     ], (err, asyncResult) => {
@@ -45,13 +51,14 @@ module.exports.selector  = (input, callback) => {
     let datatype        = !_.isNil(input.datatype)      ? input.datatype                                    : '';
     let frequencies     = !_.isNil(input.frequencies)   ? JSON.parse(input.frequencies)                     : [];
 	let source			= !_.isNil(input.source)   		? JSON.parse(input.source)							: [];
+	let wilayah			= !_.isNil(input.location)		? {$in: [input.location]}							: undefined;
 
 	let explain     	= !_.isNil(input.explain)   	? (input.explain == 'true')							: false;
 
     async.waterfall([
 		function (flowCallback) {
 			db.getCollection('raw').aggregate([
-				{ $match: { freqs: { $in: frequencies }, source : { $in: source }}},
+				{ $match: _.omitBy({ freqs: { $in: frequencies }, source : { $in: source }, wilayah}, _.isNil)},
 				{ $unwind: '$tags' },
 				{ $group: { '_id': '$tags', 'count': { '$sum': 1 }}},
 				{ $sort: { 'count': -1 }},
